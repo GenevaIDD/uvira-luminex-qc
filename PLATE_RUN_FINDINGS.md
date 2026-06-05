@@ -29,6 +29,8 @@ what looked good vs. broken, and any follow-up indicated.
 | 2 | `PLATE_05182026_RUN000` | 2026-05-18 | **High** | 82 | 2 (NI7, NI18) | ❌ **Standard curve broken** — S1 only, S2–S10 at noise floor |
 | 3 | `PLATE_05272026_RUN000` | 2026-05-27 | **Low** ⚠ | 82 | 2 (NI7, NI18) | ⚠ **Wrong PMT mode**; standards also broken (S1 → S2 ~10× too big) |
 | 4 | `PLATE_05272026_RUN002` | 2026-05-27 | **High** | 82 | 2 (NI7, NI18) | ⚠ **High-PMT re-read of plate 3**. Standards still broken (same wet-lab issue); Background levels now in line with other High-PMT plates |
+| 5 | `PLATE_06032026_PlateDF` | 2026-06-03 | **High** | 36 | 5 (3 Giardia + NI7/NI18) | ✅ **Partial plate** (Box1 rows D–F). Standards clean again (S1/S2 ≈ 2–2.6×); single dry-read well (D4) re-read and merged |
+| 6 | `PLATE_06032026_PlateAC` | 2026-06-03 | **High** | 36 | 5 (3 Giardia + NI7/NI18) | ✅ **Partial plate** (Box1 rows A–C). Standards clean (S1/S2 ≈ 1.9–2.4×); two dry-read wells (A1, H9) re-read and merged |
 
 > **⚠ Watch the PMT mode.** As of Session 15 the Plate Overview banner
 > at the top of every report shows the **Operating mode** (`FLEXMAP 3D®
@@ -549,5 +551,115 @@ dilution-series failure — independent of PMT mode):
 
 ---
 
-*Last updated: Session 15 (2026-05-28). Append a new entry below this
+---
+
+## Plates 5 & 6 — `PLATE_06032026_PlateDF` and `PLATE_06032026_PlateAC` (2026-06-03)
+
+### Context — multi-run xPONENT file
+The Intelliflex packed five plate reads into a single CSV
+(`D4repeat_D-F_UviraBox1_03-06-2026.csv`), Batch field
+`PLATE_06032026_RUN000-…-RUN004`. The `Location` column is
+`N(plate_idx,well)`, with:
+
+| `plate_idx` | Contents | Becomes |
+|---|---|---|
+| 1 | Full "Plate D-F" read (89 wells; D4 dry-read) | Plate 5 / `PLATE_06032026_PlateDF` |
+| 2 | Full "Plate A-C" read (85 wells; A1 + H9 dry-read; F4/F6/H7 skipped) | Plate 6 / `PLATE_06032026_PlateAC` |
+| 3 | Single-well re-reads of A1 + H9 | merged into Plate A-C |
+| 5 | Single-well re-read of D4 | merged into Plate D-F |
+
+Re-reads are matched by well and substituted into whichever parent
+plate was missing that well (see `scripts/split_multiplate_csv.py`).
+The script also synthesises a per-plate `inputfile.csv` so the
+authoritative Type-column classification picks up the new layout:
+
+- A1–A10 → Standard
+- A11–A12, **E1–E12, F1–F12, G1–G12, H7** → Background (PBT or PBS blank)
+- B/C/D 1–12 → Unknown (serum samples; Description = barcode for Box1 lookup)
+- H8–H10 → Control (**Giardia NC**: GiardiaU21 / GiardiaKin67 / GiardiaG422)
+- H11–H12 → Control (NI7 / NI18)
+
+### Layout (both plates)
+Same partial-plate layout, shared standards + NC prep:
+
+- Plate D-F: B–D × 1–12 = 36 serum samples from Box1 rows D–F
+- Plate A-C: B–D × 1–12 = 36 serum samples from Box1 rows A–C
+- Both: 36 PBS blanks in E/F/G + 1 in H7 (extra background; **38 wells
+  feeding the Background QC stats** vs the usual 2)
+- Both: 3 Giardia NC + NI7 + NI18
+
+### What the reports showed
+- **Standards curves are clean again.** S1/S2 ratios on the mAbs and
+  strong-signal standards:
+
+  | Antigen | Plate D-F | Plate A-C | Pilot reference |
+  |---|---|---|---|
+  | `BAC_S.typhi_HlyE` *(mAb)* | **2.0×** | **1.9×** | 2.4× |
+  | `CHO_CtxB` *(mAb)* | **2.6×** | **2.4×** | 3.0× |
+  | `CHO_Inaba_OSP` *(mAb)* | **2.5×** | **2.3×** | 2.4× |
+
+  The two-plates-share-one-standards-prep design works — both plates
+  see the same dilution series, and the ratios are essentially
+  identical between plates (intra-assay reproducibility is in hand).
+  Compare to plates 2/3/4 which sat at 30–760× S1/S2; the wet-lab
+  protocol issue has been resolved.
+
+- **All 197 analytes produce at least one in-range specimen** on
+  both plates. Range-status counts:
+
+  | | Plate D-F | Plate A-C |
+  |---|---|---|
+  | IN_RANGE | 4,589 | 4,402 |
+  | BELOW_RANGE | 2,093 | 2,437 |
+  | ABOVE_RANGE | 410 | 253 |
+
+- **NC working.** All 5 NC wells per plate are classified correctly
+  and feed `nc_well_history.json`. Example HHV_CMV MFI:
+
+  | Sample | Plate D-F | Plate A-C |
+  |---|---|---|
+  | GiardiaG422 | 236 | 172 |
+  | GiardiaKin67 | **7,211** | **8,127** |
+  | GiardiaU21 | 151 | 145 |
+  | NI18 | 780 | 266 |
+  | NI7 | 150 | 35 |
+
+  `GiardiaKin67` reads ~50× higher than the other Giardia samples on
+  HHV_CMV across both plates — worth flagging for the team (either
+  it's a CMV-positive serum dressed up as a Giardia NC, or the well
+  is contaminated). The replication across the two plates rules out
+  a per-plate handling error.
+
+- **Background QC now has 39 wells** (2 PBT blanks + 36 PBS blanks
+  + 1 H7) instead of 2 — much better SNR for the noisy-antigen
+  detection logic.
+
+- **Patient-ID resolution: 100 %** (36/36 on each plate, via Box1
+  xlsx).
+
+### Cross-plate state after this session
+History JSONs now cover 6 plates (5 for NC, since the pilot had
+none).
+
+### Recommendations / follow-ups
+1. **Standards protocol is fixed.** Lab can trust specimen-level
+   interpretations on these two plates. Reasonable to start
+   reporting AU values on a panel-by-panel basis.
+2. **Investigate `GiardiaKin67`** — anomalously high MFI on several
+   antigens compared to the other Giardia controls; appears across
+   both plates, so the sample itself is the issue, not the plate
+   run.
+3. **Plate-DF dry read on D4** and **Plate-AC dry reads on A1, H9**
+   were handled by the splitter — verified in the rendered reports
+   (the wells are present, not missing).
+4. **Persistently noisy antigens** (`SARS_CoV-2_Spike_Omicron`,
+   `BAC_Chlamydia_pneumoniae`, `FLU_H5N1_HA1_Hubei_2010`,
+   `ARB_YFV_NS1`, `HHV_HHV7`) need a re-check against the larger
+   Background pool now that we have 38 PBS wells contributing — the
+   per-antigen Background QC table on these reports will give a much
+   tighter estimate of the noise floor.
+
+---
+
+*Last updated: Session 20 (2026-06-04). Append a new entry below this
 line for each subsequent plate run.*

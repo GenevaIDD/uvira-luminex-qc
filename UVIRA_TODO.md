@@ -387,12 +387,111 @@ decisions still TBD.
 
 ## Open questions for the user
 
-_None at the moment._ All four initial questions are resolved (see
-Decisions log).
+- **Should multi-run xPONENT CSVs be a first-class feature?** As of
+  Session 20, the app itself still only ingests single-plate CSVs —
+  multi-run files (e.g. `D4repeat_D-F_UviraBox1_03-06-2026.csv`,
+  which packed 5 reads into one file) are handled by a manual
+  preprocessing step (`scripts/split_multiplate_csv.py`) that the
+  operator runs from the terminal before uploading. If multi-run
+  exports are going to be the norm on the Intelliflex going forward,
+  this should be lifted into the Flask upload flow (auto-detect the
+  `N(plate_idx,well)` Location pattern, prompt for plate labels +
+  re-run assignments, run the pipeline once per logical plate). If
+  they're an occasional one-off, the script is fine as-is. **Need to
+  decide.**
 
 ---
 
 ## Session History
+
+### Session 20 — 2026-06-04 (Multi-run xPONENT CSV splitter — Plates 5 & 6)
+
+User uploaded a single xPONENT CSV
+(`D4repeat_D-F_UviraBox1_03-06-2026.csv`) containing **five plate
+reads** packed into one file: two partial-plate full reads (Plate
+D-F and Plate A-C, Box1 samples split across them) plus three
+single-well dry-read re-runs (D4, A1, H9). The Intelliflex encodes
+the plate origin in the `Location` field as `N(plate_idx,well)`.
+
+**Approach decided with the user** (`AskUserQuestion`):
+
+- Plate IDs: `PLATE_06032026_PlateDF` + `PLATE_06032026_PlateAC`.
+- Re-run merge: **replace the dry-read value** with the re-run value
+  in the parent plate (cleanest for downstream QC).
+- PBS wells (E/F/G + H7, labelled `UnknownNN`): **classify as
+  Background** so they feed the noisy-antigen detection logic. 39
+  background wells per plate (vs 2 on previous plates) → much
+  tighter SNR estimate.
+- Giardia NC wells (H8–H10, labelled `Giardia*`): **classify as
+  Control**, joining NI7/NI18 in the NC heatmap and
+  `nc_well_history.json`.
+
+**Implementation:**
+
+Wrote `scripts/split_multiplate_csv.py` — a standalone preprocessor
+that:
+
+- Reads the multi-plate xPONENT CSV in one pass.
+- Detects the re-run plate indices (3, 4, 5) and the wells they
+  re-read; assigns each re-run row to whichever parent plate (1 or
+  2) is missing that well in its own block (warns if ambiguous or
+  not missing in either).
+- Emits **one xPONENT-format CSV per logical plate** with: (i) the
+  original metadata header (Batch field rewritten to the logical
+  plate ID), (ii) each `DataType:` block from the source, restricted
+  to the rows for that parent + the assigned re-run rows. Location
+  fields are renormalised to `N(1,well)` so the existing parser
+  doesn't need plate-aware logic.
+- Also emits a per-plate `<label>_inputfile.csv` with
+  Location/Type/Description so the pipeline's authoritative
+  Type-column classification picks up the new layout (Standards /
+  Background / Unknown / Control mapping per the user's plate
+  spec). Serum-well Description = barcode so the Box1 xlsx lookup
+  still resolves patient IDs.
+
+No changes needed to the pipeline, parser, classify, or report code
+— the splitter writes files that look exactly like a single-plate
+xPONENT export, so everything downstream just runs.
+
+**Smoke results** (both reports in
+`~/uvira-luminex-qc-results/smoke/`):
+
+| | PlateDF | PlateAC |
+|---|---|---|
+| Wells parsed | 90 (89 + 1 D4 re-run) | 87 (85 + A1 + H9 re-runs) |
+| Specimens | 36 | 36 |
+| Patient-ID resolution | 36/36 ✓ | 36/36 ✓ |
+| NC samples | GiardiaG422, GiardiaKin67, GiardiaU21, NI7, NI18 | same |
+| Background wells | 39 | 39 |
+| Standards S1/S2 (mAbs) | **2.0–2.6×** ✓ | **1.9–2.4×** ✓ |
+| In-range cells | 4,589 | 4,402 |
+| `fit_ok` | most analytes pass | most analytes pass |
+
+**The standards problem from plates 2/3/4 is resolved.** Both new
+plates show clean dilution series with S1/S2 ratios on par with the
+pilot. Specimen-level interpretation can be trusted again. Full
+write-up in [`PLATE_RUN_FINDINGS.md`](PLATE_RUN_FINDINGS.md) under
+Plates 5 & 6.
+
+**One thing worth flagging from the data**: `GiardiaKin67` reads
+~50× higher than the other two Giardia NC wells on `HHV_CMV` across
+both plates (7,211 / 8,127 MFI vs 145–236 for GiardiaU21 / G422).
+Replicates across the two plates rule out a per-plate handling
+error — the sample itself looks like it's either CMV-positive or
+contaminated. Worth raising with the lab.
+
+**Files touched:**
+
+- `scripts/split_multiplate_csv.py` (new, ~190 lines).
+- `PLATE_RUN_FINDINGS.md` — index row + per-plate section + Session
+  20 stamp.
+- `UVIRA_TODO.md` — this entry.
+
+**Carry-over to Session 21+:** unchanged from prior. If multi-run
+xPONENT files become a routine input format, lifting the splitter
+into the Flask upload flow (auto-detect multi-plate CSVs, prompt
+for plate labels, run twice) is a reasonable next step. For now the
+script is run manually.
 
 ### Session 19 — 2026-05-28 (Cross-run scatter legend toggle fix)
 
